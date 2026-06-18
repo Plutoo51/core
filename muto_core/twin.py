@@ -67,6 +67,9 @@ class Twin(Node):
         # Declare Parameters
         self.declare_parameter("twin_url", "")
         self.declare_parameter("anonymous", False)
+        self.declare_parameter("jwt_url", "")
+        self.declare_parameter("jwt_client_id", "")
+        self.declare_parameter("jwt_client_secret", "")
         self.declare_parameter("namespace", "")
         self.declare_parameter("name", "")
         self.declare_parameter("type", "")
@@ -79,6 +82,9 @@ class Twin(Node):
         # Initialize Parameters
         self.twin_url = self.get_parameter("twin_url").value
         self.anonymous = self.get_parameter("anonymous").value
+        self.jwt_url = self.get_parameter("jwt_url").value
+        self.jwt_client_id = self.get_parameter("jwt_client_id").value
+        self.jwt_client_secret = self.get_parameter("jwt_client_secret").value
         self.namespace = self.get_parameter("namespace").value
         self.name = self.get_parameter("name").value
         self.type = self.get_parameter("type").value
@@ -174,9 +180,19 @@ class Twin(Node):
         Returns:
             int: The HTTP status code from the final registration attempt.
         """
+        token = self.get_jwt_token().get("access_token", "")
+
+        if not token:
+            self.get_logger().error("Error occurred while getting JWT token...")
+            return 400
+
         res = requests.patch(
             f"{self.twin_url}/api/2/things/{self.thing_id}",
-            headers={"Content-type": "application/merge-patch+json"},
+            headers=
+            {
+                "Content-type": "application/merge-patch+json",
+                "Authorization": f"Bearer {token}",
+            },
             json=self.device_register_data(),
         )
 
@@ -184,13 +200,20 @@ class Twin(Node):
             data = self.device_register_data()
             data["policyId"] = self.thing_id
             res = requests.put(
-                f"{self.twin_url}/api/2/things/{self.thing_id}", headers={"Content-type": "application/json"}, json=data
+                f"{self.twin_url}/api/2/things/{self.thing_id}",
+                headers = {"Content-type": "application/json", "Authorization": f"Bearer {token}",},
+                json=data
             )
 
         if res.status_code == 404:
             data = self.device_register_data()
             res = requests.put(
-                f"{self.twin_url}/api/2/things/{self.thing_id}", headers={"Content-type": "application/json"}, json=data
+                f"{self.twin_url}/api/2/things/{self.thing_id}",
+                headers = {
+                    "Content-type": "application/json",
+                    "Authorization": f"Bearer {token}",
+                },
+                json=data
             )
 
         if res.status_code == 201 or res.status_code == 204:
@@ -334,7 +357,7 @@ class Twin(Node):
         """
         try:
             self.socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket_.connect((self.twin_url.split("@")[1], 1883))
+            self.socket_.connect((self.twin_url.replace("https://", ""), 1885))
 
             if not self.is_device_registered:
                 self.register_device()
@@ -345,6 +368,46 @@ class Twin(Node):
             self.get_logger().warn(f"Twin Server ping failed: {ex}")
         finally:
             del self.socket_
+
+    def get_jwt_token(self):
+        """
+        Fetch a JWT access token using the OAuth2 client credentials flow.
+
+        Sends a POST request to the configured JWT endpoint with the client's
+        credentials and returns the parsed JSON response, which typically
+        contains the access token along with metadata such as expiry and
+        token type.
+
+        Returns:
+            dict: The parsed JSON response from the JWT endpoint. Expected
+                keys typically include:
+                    - access_token (str): The issued JWT.
+                    - token_type (str): Usually "Bearer".
+                    - expires_in (int): Token lifetime in seconds.
+
+        Raises:
+            requests.exceptions.RequestException: If the HTTP request fails
+                (e.g., connection error, timeout).
+            ValueError: If the response body is not valid JSON.
+
+        Note:
+            This method does not call `raise_for_status()`, so HTTP error
+            responses (4xx/5xx) will not raise an exception and may instead
+            return an error payload as a dict.
+        """
+        response = requests.post(
+            self.jwt_url,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self.jwt_client_id,
+                "client_secret": self.jwt_client_secret,
+            }
+        ).json()
+
+        return response
 
 
 def main():
