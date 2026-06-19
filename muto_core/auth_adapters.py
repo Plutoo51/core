@@ -53,9 +53,12 @@ class NoneAuthAdapter(AuthAdapter):
 class BasicAuthAdapter(AuthAdapter):
     """Applies HTTP Basic authentication using a username and password."""
 
-    def __init__(self, username: str, password: str):
-        self.username = username
-        self.password = password
+    def __init__(self, node):
+        node.declare_parameter("user", "")
+        node.declare_parameter("password", "")
+
+        self.username = node.get_parameter("user").value
+        self.password = node.get_parameter("password").value
 
     def apply(self, headers: dict) -> dict | None:
         headers = dict(headers)
@@ -71,11 +74,16 @@ class OAuth2Adapter(AuthAdapter):
     client credentials grant.
     """
 
-    def __init__(self, node, jwt_url: str, jwt_client_id: str, jwt_client_secret: str):
+    def __init__(self, node):
         self.node = node
-        self.jwt_url = jwt_url
-        self.jwt_client_id = jwt_client_id
-        self.jwt_client_secret = jwt_client_secret
+
+        node.declare_parameter("jwt_url", "")
+        node.declare_parameter("jwt_client_id", "")
+        node.declare_parameter("jwt_client_secret", "")
+
+        self.jwt_url = node.get_parameter("jwt_url").value
+        self.jwt_client_id = node.get_parameter("jwt_client_id").value
+        self.jwt_client_secret = node.get_parameter("jwt_client_secret").value
 
     def get_jwt_token(self) -> dict:
         """
@@ -134,27 +142,20 @@ class OAuth2Adapter(AuthAdapter):
 
 
 _ADAPTER_FACTORIES = {
-    "none": lambda node, **kwargs: NoneAuthAdapter(),
-    "basic": lambda node, **kwargs: BasicAuthAdapter(
-        kwargs.get("username", ""), kwargs.get("password", "")
-    ),
-    "oauth2": lambda node, **kwargs: OAuth2Adapter(
-        node,
-        kwargs.get("jwt_url", ""),
-        kwargs.get("jwt_client_id", ""),
-        kwargs.get("jwt_client_secret", ""),
-    ),
+    "none": lambda node : NoneAuthAdapter(),
+    "basic": lambda node : BasicAuthAdapter(node),
+    "oauth2": lambda node : OAuth2Adapter(node,),
 }
 
 
-def create_auth_adapter(auth_type: str, node, **kwargs) -> AuthAdapter:
+def create_auth_adapter(node) -> AuthAdapter:
     """Create the AuthAdapter for `auth_type`.
 
     Falls back to DEFAULT_AUTH_TYPE when `auth_type` is empty or unrecognized.
     New auth methods are added by registering an adapter factory in
     _ADAPTER_FACTORIES.
     """
-    factory = _ADAPTER_FACTORIES.get((auth_type or "").strip().lower())
+    factory = _ADAPTER_FACTORIES.get((node.auth_type or "").strip().lower())
     if factory is None:
         factory = _ADAPTER_FACTORIES[DEFAULT_AUTH_TYPE]
-    return factory(node, **kwargs)
+    return factory(node)

@@ -70,11 +70,6 @@ class Twin(Node):
         self.declare_parameter("twin_url", "")
         self.declare_parameter("anonymous", False)
         self.declare_parameter("auth_type", "")
-        self.declare_parameter("user", "")
-        self.declare_parameter("password", "")
-        self.declare_parameter("jwt_url", "")
-        self.declare_parameter("jwt_client_id", "")
-        self.declare_parameter("jwt_client_secret", "")
         self.declare_parameter("namespace", "")
         self.declare_parameter("name", "")
         self.declare_parameter("type", "")
@@ -88,11 +83,6 @@ class Twin(Node):
         self.twin_url = self.get_parameter("twin_url").value
         self.anonymous = self.get_parameter("anonymous").value
         self.auth_type = self.get_parameter("auth_type").value
-        self.user = self.get_parameter("user").value
-        self.password = self.get_parameter("password").value
-        self.jwt_url = self.get_parameter("jwt_url").value
-        self.jwt_client_id = self.get_parameter("jwt_client_id").value
-        self.jwt_client_secret = self.get_parameter("jwt_client_secret").value
         self.namespace = self.get_parameter("namespace").value
         self.name = self.get_parameter("name").value
         self.type = self.get_parameter("type").value
@@ -107,15 +97,7 @@ class Twin(Node):
 
         # Authentication strategy used for all twin server requests. Falls back to
         # no authentication when auth_type is unset/unrecognized.
-        self.auth_adapter = create_auth_adapter(
-            self.auth_type,
-            self,
-            username=self.user,
-            password=self.password,
-            jwt_url=self.jwt_url,
-            jwt_client_id=self.jwt_client_id,
-            jwt_client_secret=self.jwt_client_secret,
-        )
+        self.auth_adapter = create_auth_adapter(self)
 
         # Services
         TwinServices(self, self.get_name())

@@ -13,6 +13,7 @@
 
 import base64
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from muto_core.auth_adapters import (
@@ -21,6 +22,24 @@ from muto_core.auth_adapters import (
     OAuth2Adapter,
     create_auth_adapter,
 )
+
+
+class FakeNode:
+    """Minimal stand-in for the subset of the rclpy Node API adapters rely on."""
+
+    def __init__(self, auth_type: str = "", **params):
+        self.auth_type = auth_type
+        self._params = params
+        self._logger = MagicMock()
+
+    def declare_parameter(self, name, default=""):
+        self._params.setdefault(name, default)
+
+    def get_parameter(self, name):
+        return SimpleNamespace(value=self._params.get(name, ""))
+
+    def get_logger(self):
+        return self._logger
 
 
 class TestNoneAuthAdapter(unittest.TestCase):
@@ -37,32 +56,35 @@ class TestNoneAuthAdapter(unittest.TestCase):
 
 class TestBasicAuthAdapter(unittest.TestCase):
 
+    def setUp(self):
+        self.node = FakeNode(user="ditto", password="ditto")
+        self.adapter = BasicAuthAdapter(self.node)
+
     def test_apply_adds_basic_auth_header(self):
-        adapter = BasicAuthAdapter("ditto", "ditto")
-        result = adapter.apply({"Content-type": "application/json"})
+        result = self.adapter.apply({"Content-type": "application/json"})
 
         expected_credentials = base64.b64encode(b"ditto:ditto").decode()
         self.assertEqual(result["Content-type"], "application/json")
         self.assertEqual(result["Authorization"], f"Basic {expected_credentials}")
 
     def test_apply_does_not_mutate_input_headers(self):
-        adapter = BasicAuthAdapter("ditto", "ditto")
         headers = {}
-        adapter.apply(headers)
+        self.adapter.apply(headers)
         self.assertEqual(headers, {})
 
     def test_get_credentials_is_empty(self):
-        adapter = BasicAuthAdapter("ditto", "ditto")
-        self.assertEqual(adapter.get_credentials(), {})
+        self.assertEqual(self.adapter.get_credentials(), {})
 
 
 class TestOAuth2Adapter(unittest.TestCase):
 
     def setUp(self):
-        self.node = MagicMock()
-        self.adapter = OAuth2Adapter(
-            self.node, "https://jwt.example/token", "client-id", "client-secret"
+        self.node = FakeNode(
+            jwt_url="https://jwt.example/token",
+            jwt_client_id="client-id",
+            jwt_client_secret="client-secret",
         )
+        self.adapter = OAuth2Adapter(self.node)
 
     @patch("requests.post")
     def test_get_jwt_token(self, mock_post):
@@ -110,40 +132,38 @@ class TestOAuth2Adapter(unittest.TestCase):
 
 class TestCreateAuthAdapter(unittest.TestCase):
 
-    def setUp(self):
-        self.node = MagicMock()
-
     def test_creates_none_adapter(self):
-        adapter = create_auth_adapter("none", self.node)
+        adapter = create_auth_adapter(FakeNode(auth_type="none"))
         self.assertIsInstance(adapter, NoneAuthAdapter)
 
     def test_creates_basic_adapter(self):
-        adapter = create_auth_adapter("basic", self.node, username="u", password="p")
+        adapter = create_auth_adapter(FakeNode(auth_type="basic", user="u", password="p"))
         self.assertIsInstance(adapter, BasicAuthAdapter)
         self.assertEqual(adapter.username, "u")
         self.assertEqual(adapter.password, "p")
 
     def test_creates_oauth2_adapter(self):
         adapter = create_auth_adapter(
-            "oauth2",
-            self.node,
-            jwt_url="https://jwt.example/token",
-            jwt_client_id="client-id",
-            jwt_client_secret="client-secret",
+            FakeNode(
+                auth_type="oauth2",
+                jwt_url="https://jwt.example/token",
+                jwt_client_id="client-id",
+                jwt_client_secret="client-secret",
+            )
         )
         self.assertIsInstance(adapter, OAuth2Adapter)
         self.assertEqual(adapter.jwt_url, "https://jwt.example/token")
 
     def test_unknown_auth_type_defaults_to_none(self):
-        adapter = create_auth_adapter("client_cert", self.node)
+        adapter = create_auth_adapter(FakeNode(auth_type="client_cert"))
         self.assertIsInstance(adapter, NoneAuthAdapter)
 
     def test_empty_auth_type_defaults_to_none(self):
-        adapter = create_auth_adapter("", self.node)
+        adapter = create_auth_adapter(FakeNode(auth_type=""))
         self.assertIsInstance(adapter, NoneAuthAdapter)
 
     def test_auth_type_is_case_insensitive(self):
-        adapter = create_auth_adapter("Basic", self.node, username="u", password="p")
+        adapter = create_auth_adapter(FakeNode(auth_type="Basic", user="u", password="p"))
         self.assertIsInstance(adapter, BasicAuthAdapter)
 
 

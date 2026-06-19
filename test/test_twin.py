@@ -13,12 +13,30 @@
 
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import rclpy
 
 from muto_core.auth_adapters import NoneAuthAdapter, OAuth2Adapter
 from muto_core.twin import Twin
+
+
+class _FakeOAuth2Node:
+    """Minimal stand-in for the rclpy Node API OAuth2Adapter relies on."""
+
+    def __init__(self, **params):
+        self._params = params
+        self._logger = MagicMock()
+
+    def declare_parameter(self, name, default=""):
+        self._params.setdefault(name, default)
+
+    def get_parameter(self, name):
+        return SimpleNamespace(value=self._params.get(name, ""))
+
+    def get_logger(self):
+        return self._logger
 
 
 class TestTwin(unittest.TestCase):
@@ -253,7 +271,11 @@ class TestTwin(unittest.TestCase):
     @patch("requests.post")
     def test_register_device_uses_oauth2_bearer_token(self, mock_post):
         self.node.auth_adapter = OAuth2Adapter(
-            self.node, "https://jwt.example/token", "client-id", "client-secret"
+            _FakeOAuth2Node(
+                jwt_url="https://jwt.example/token",
+                jwt_client_id="client-id",
+                jwt_client_secret="client-secret",
+            )
         )
         mock_post.return_value.json.return_value = {"access_token": "abc123"}
 
