@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 
 import requests
 
-DEFAULT_AUTH_TYPE = "oauth2"
+DEFAULT_AUTH_TYPE = "none"
 
 
 class AuthAdapter(ABC):
@@ -31,6 +31,16 @@ class AuthAdapter(ABC):
         Returns None if authentication could not be established, signalling
         to the caller that the request must not be sent.
         """
+
+    def get_credentials(self) -> dict:
+        """Return credential metadata exposed by this adapter, if any.
+
+        Generic contract so callers (e.g. the `get_credentials` service) can
+        query whichever adapter is configured without knowing its concrete
+        type. Adapters that don't issue explicit credentials (None, Basic)
+        return {}.
+        """
+        return {}
 
 
 class NoneAuthAdapter(AuthAdapter):
@@ -107,6 +117,10 @@ class OAuth2Adapter(AuthAdapter):
 
         return response
 
+    def get_credentials(self) -> dict:
+        """Fulfil the generic AuthAdapter contract via the OAuth2 client credentials flow."""
+        return self.get_jwt_token()
+
     def apply(self, headers: dict) -> dict | None:
         token = self.get_jwt_token().get("access_token", "")
 
@@ -136,10 +150,9 @@ _ADAPTER_FACTORIES = {
 def create_auth_adapter(auth_type: str, node, **kwargs) -> AuthAdapter:
     """Create the AuthAdapter for `auth_type`.
 
-    Falls back to DEFAULT_AUTH_TYPE when `auth_type` is empty or unrecognized,
-    preserving the OAuth2 bearer-token behavior that twin server requests
-    relied on previously. New auth methods are added by registering an
-    adapter factory in _ADAPTER_FACTORIES.
+    Falls back to DEFAULT_AUTH_TYPE when `auth_type` is empty or unrecognized.
+    New auth methods are added by registering an adapter factory in
+    _ADAPTER_FACTORIES.
     """
     factory = _ADAPTER_FACTORIES.get((auth_type or "").strip().lower())
     if factory is None:

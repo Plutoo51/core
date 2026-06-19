@@ -21,7 +21,7 @@ import rclpy
 import requests
 from rclpy.node import Node
 
-from muto_core.auth_adapters import OAuth2Adapter, create_auth_adapter
+from muto_core.auth_adapters import create_auth_adapter
 from muto_core.twin_services import TwinServices
 
 
@@ -106,7 +106,7 @@ class Twin(Node):
         self.is_device_registered = False
 
         # Authentication strategy used for all twin server requests. Falls back to
-        # OAuth2 (the previous default behavior) when auth_type is unset/unrecognized.
+        # no authentication when auth_type is unset/unrecognized.
         self.auth_adapter = create_auth_adapter(
             self.auth_type,
             self,
@@ -407,15 +407,14 @@ class Twin(Node):
         finally:
             del self.socket_
 
-    def get_jwt_token(self) -> dict:
-        """Fetch a JWT access token, delegating to the OAuth2 adapter when configured.
+    def get_credentials(self) -> dict:
+        """Fetch credential info via the configured auth adapter.
 
-        Kept for backwards compatibility with the `get_jwt_token` service; the
-        client-credentials flow itself lives in OAuth2Adapter.
+        Delegates to the adapter's generic `get_credentials` contract method
+        so Twin stays agnostic of which concrete adapter (None/Basic/OAuth2/...)
+        is configured.
         """
-        if isinstance(self.auth_adapter, OAuth2Adapter):
-            return self.auth_adapter.get_jwt_token()
-        return {}
+        return self.auth_adapter.get_credentials()
 
 
 def main():

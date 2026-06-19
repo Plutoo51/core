@@ -266,6 +266,15 @@ class TestTwin(unittest.TestCase):
             "Bearer abc123",
         )
 
+    def test_get_credentials_delegates_to_adapter(self):
+        self.node.auth_adapter = MagicMock()
+        self.node.auth_adapter.get_credentials.return_value = {"access_token": "abc123"}
+
+        result = self.node.get_credentials()
+
+        self.assertEqual(result, {"access_token": "abc123"})
+        self.node.auth_adapter.get_credentials.assert_called_once()
+
     @patch("requests.request")
     def test_get_registered_telemetries(self, mock_req):
         mock_response_patch = MagicMock()
@@ -396,9 +405,9 @@ class TestTwin(unittest.TestCase):
             "Telemetry deletion was unsuccessful - 404."
         )
 
-    def test_default_auth_adapter_is_oauth2(self):
+    def test_default_auth_adapter_is_none(self):
         node = Twin()
-        self.assertIsInstance(node.auth_adapter, OAuth2Adapter)
+        self.assertIsInstance(node.auth_adapter, NoneAuthAdapter)
 
     def test_device_register_data(self):
         returned_value = self.node.device_register_data()

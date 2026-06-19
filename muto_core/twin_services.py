@@ -34,7 +34,7 @@ class TwinServices:
         self.node.create_service(CoreTwin, f"{self.nname}/register_telemetry", self.callback_register_telemetry)
         self.node.create_service(CoreTwin, f"{self.nname}/delete_telemetry", self.callback_delete_telemetry)
         self.node.create_service(CoreTwin, f"{self.nname}/get_internet_status", self.callback_get_internet_status)
-        self.node.create_service(CoreTwin, f"{self.nname}/get_jwt_token", self.callback_get_jwt_token)
+        self.node.create_service(CoreTwin, f"{self.nname}/get_credentials", self.callback_get_credentials)
 
     def callback_get_current_properties(self, request, response):
         """
@@ -247,20 +247,7 @@ class TwinServices:
 
         return response
 
-    def callback_get_jwt_token(self, request, response):
-        """
-        Retrieves the JWT token from the associated node.
-
-        This callback handles a request to get the JWT token. It retrieves the token
-        from the node instance, serializes it to JSON, and sets it as the response output.
-
-        Args:
-            request: The request object containing input data.
-            response: The response object for returning output data.
-
-        Returns:
-            response: The response object containing the serialized JWT token.
-        """
-        response.output = json.dumps(self.node.get_jwt_token())
+    def callback_get_credentials(self, request, response):
+        response.output = json.dumps(self.node.get_credentials())
 
         return response

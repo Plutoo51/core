@@ -30,6 +30,10 @@ class TestNoneAuthAdapter(unittest.TestCase):
         result = adapter.apply({"Content-type": "application/json"})
         self.assertEqual(result, {"Content-type": "application/json"})
 
+    def test_get_credentials_is_empty(self):
+        adapter = NoneAuthAdapter()
+        self.assertEqual(adapter.get_credentials(), {})
+
 
 class TestBasicAuthAdapter(unittest.TestCase):
 
@@ -46,6 +50,10 @@ class TestBasicAuthAdapter(unittest.TestCase):
         headers = {}
         adapter.apply(headers)
         self.assertEqual(headers, {})
+
+    def test_get_credentials_is_empty(self):
+        adapter = BasicAuthAdapter("ditto", "ditto")
+        self.assertEqual(adapter.get_credentials(), {})
 
 
 class TestOAuth2Adapter(unittest.TestCase):
@@ -72,6 +80,12 @@ class TestOAuth2Adapter(unittest.TestCase):
                 "client_secret": "client-secret",
             },
         )
+
+    @patch("requests.post")
+    def test_get_credentials_delegates_to_get_jwt_token(self, mock_post):
+        mock_post.return_value.json.return_value = {"access_token": "abc123"}
+
+        self.assertEqual(self.adapter.get_credentials(), {"access_token": "abc123"})
 
     @patch("requests.post")
     def test_apply_attaches_bearer_token(self, mock_post):
@@ -120,13 +134,13 @@ class TestCreateAuthAdapter(unittest.TestCase):
         self.assertIsInstance(adapter, OAuth2Adapter)
         self.assertEqual(adapter.jwt_url, "https://jwt.example/token")
 
-    def test_unknown_auth_type_defaults_to_oauth2(self):
+    def test_unknown_auth_type_defaults_to_none(self):
         adapter = create_auth_adapter("client_cert", self.node)
-        self.assertIsInstance(adapter, OAuth2Adapter)
+        self.assertIsInstance(adapter, NoneAuthAdapter)
 
-    def test_empty_auth_type_defaults_to_oauth2(self):
+    def test_empty_auth_type_defaults_to_none(self):
         adapter = create_auth_adapter("", self.node)
-        self.assertIsInstance(adapter, OAuth2Adapter)
+        self.assertIsInstance(adapter, NoneAuthAdapter)
 
     def test_auth_type_is_case_insensitive(self):
         adapter = create_auth_adapter("Basic", self.node, username="u", password="p")
