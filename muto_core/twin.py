@@ -21,6 +21,7 @@ import rclpy
 import requests
 from rclpy.node import Node
 
+from muto_core.auth_adapters import OAuth2Adapter, create_auth_adapter
 from muto_core.twin_services import TwinServices
 
 
@@ -35,6 +36,7 @@ class Twin(Node):
     Attributes:
         twin_url (str): The URL of the twin server.
         anonymous (bool): Whether the device should be named randomly.
+        auth_adapter (AuthAdapter): Strategy used to authenticate requests to the twin server.
         namespace (str): The namespace of the device.
         name (str): The name of the device.
         type (str): The type of the device.
@@ -67,6 +69,9 @@ class Twin(Node):
         # Declare Parameters
         self.declare_parameter("twin_url", "")
         self.declare_parameter("anonymous", False)
+        self.declare_parameter("auth_type", "")
+        self.declare_parameter("user", "")
+        self.declare_parameter("password", "")
         self.declare_parameter("jwt_url", "")
         self.declare_parameter("jwt_client_id", "")
         self.declare_parameter("jwt_client_secret", "")
@@ -82,6 +87,9 @@ class Twin(Node):
         # Initialize Parameters
         self.twin_url = self.get_parameter("twin_url").value
         self.anonymous = self.get_parameter("anonymous").value
+        self.auth_type = self.get_parameter("auth_type").value
+        self.user = self.get_parameter("user").value
+        self.password = self.get_parameter("password").value
         self.jwt_url = self.get_parameter("jwt_url").value
         self.jwt_client_id = self.get_parameter("jwt_client_id").value
         self.jwt_client_secret = self.get_parameter("jwt_client_secret").value
@@ -96,6 +104,18 @@ class Twin(Node):
 
         self.internet_status = False
         self.is_device_registered = False
+
+        # Authentication strategy used for all twin server requests. Falls back to
+        # OAuth2 (the previous default behavior) when auth_type is unset/unrecognized.
+        self.auth_adapter = create_auth_adapter(
+            self.auth_type,
+            self,
+            username=self.user,
+            password=self.password,
+            jwt_url=self.jwt_url,
+            jwt_client_id=self.jwt_client_id,
+            jwt_client_secret=self.jwt_client_secret,
+        )
 
         # Services
         TwinServices(self, self.get_name())
@@ -116,12 +136,24 @@ class Twin(Node):
         """Retrieves the stack definition for a given stack ID."""
         return self.stack(stack_id)
 
+    def _request(self, method: str, url: str, headers: dict | None = None, **kwargs):
+        """Send an HTTP request to the twin server with the configured authentication applied.
+
+        Returns None without sending the request if authentication could not be established.
+        """
+        auth_headers = self.auth_adapter.apply(headers or {})
+        if auth_headers is None:
+            return None
+        return requests.request(method, url, headers=auth_headers, **kwargs)
+
     def stack(self, thing_id: str) -> dict | None:
         """The method that sends the requests if  acquire stack data"""
         try:
             if (not self.twin_url) or (not thing_id):
                 return None
-            r = requests.get(url=self.twin_url + "/api/2/things/" + thing_id + "/features/stack")
+            r = self._request("get", self.twin_url + "/api/2/things/" + thing_id + "/features/stack")
+            if r is None:
+                return None
             self.get_logger().info(f"Stack getting Status Code: {r.status_code}")
 
             if r.status_code >= 300:
@@ -144,14 +176,15 @@ class Twin(Node):
         if not stack_id:
             return
 
-        headers = {"Content-type": "application/json"}
-
         if stack_id:
-            r = requests.put(
+            r = self._request(
+                "put",
                 self.twin_url + f"/api/2/things/{self.thing_id}/features/stack/properties/current",
-                headers=headers,
+                headers={"Content-type": "application/json"},
                 json={"stackId": stack_id, "state": state},
             )
+            if r is None:
+                return
             self.get_logger().info(f"Status Code: {r.status_code}, Response: {r.text}")
 
     def get_context(self):
@@ -180,41 +213,37 @@ class Twin(Node):
         Returns:
             int: The HTTP status code from the final registration attempt.
         """
-        token = self.get_jwt_token().get("access_token", "")
-
-        if not token:
-            self.get_logger().error("Error occurred while getting JWT token...")
-            return 400
-
-        res = requests.patch(
+        res = self._request(
+            "patch",
             f"{self.twin_url}/api/2/things/{self.thing_id}",
-            headers=
-            {
-                "Content-type": "application/merge-patch+json",
-                "Authorization": f"Bearer {token}",
-            },
+            headers={"Content-type": "application/merge-patch+json"},
             json=self.device_register_data(),
         )
+        if res is None:
+            return 404
 
         if res.status_code == 400:
             data = self.device_register_data()
             data["policyId"] = self.thing_id
-            res = requests.put(
+            res = self._request(
+                "put",
                 f"{self.twin_url}/api/2/things/{self.thing_id}",
-                headers = {"Content-type": "application/json", "Authorization": f"Bearer {token}",},
-                json=data
+                headers={"Content-type": "application/json"},
+                json=data,
             )
+            if res is None:
+                return 404
 
         if res.status_code == 404:
             data = self.device_register_data()
-            res = requests.put(
+            res = self._request(
+                "put",
                 f"{self.twin_url}/api/2/things/{self.thing_id}",
-                headers = {
-                    "Content-type": "application/json",
-                    "Authorization": f"Bearer {token}",
-                },
-                json=data
+                headers={"Content-type": "application/json"},
+                json=data,
             )
+            if res is None:
+                return 404
 
         if res.status_code == 201 or res.status_code == 204:
             self.get_logger().info("Device registered successfully.")
@@ -237,10 +266,13 @@ class Twin(Node):
         Returns:
             dict: The telemetry properties received from the twin server.
         """
-        res = requests.get(
+        res = self._request(
+            "get",
             f"{self.twin_url}/api/2/things/{self.thing_id}/features/telemetry/properties",
             headers={"Content-type": "application/json"},
         )
+        if res is None:
+            return {}
 
         if res.status_code == 200:
             self.get_logger().info("Telemetry properties received successfully.")
@@ -281,11 +313,14 @@ class Twin(Node):
 
         new_definition.append(req_telemetry)
 
-        res = requests.put(
+        res = self._request(
+            "put",
             f"{self.twin_url}/api/2/things/{self.thing_id}/features/telemetry/properties/definition",
             headers={"Content-type": "application/json"},
             json=new_definition,
         )
+        if res is None:
+            return 404
 
         if res.status_code == 201:
             self.get_logger().info("Telemetry registered successfully.")
@@ -324,11 +359,14 @@ class Twin(Node):
             filtered = filter(lambda x: x.get("topic") != req_telemetry.get("topic"), current_definition)
             new_definition = list(filtered)
 
-        res = requests.put(
+        res = self._request(
+            "put",
             f"{self.twin_url}/api/2/things/{self.thing_id}/features/telemetry/properties/definition",
             headers={"Content-type": "application/json"},
             json=new_definition,
         )
+        if res is None:
+            return 404
 
         if res.status_code == 204:
             self.get_logger().info("Telemetry deleted successfully.")
@@ -369,45 +407,15 @@ class Twin(Node):
         finally:
             del self.socket_
 
-    def get_jwt_token(self):
+    def get_jwt_token(self) -> dict:
+        """Fetch a JWT access token, delegating to the OAuth2 adapter when configured.
+
+        Kept for backwards compatibility with the `get_jwt_token` service; the
+        client-credentials flow itself lives in OAuth2Adapter.
         """
-        Fetch a JWT access token using the OAuth2 client credentials flow.
-
-        Sends a POST request to the configured JWT endpoint with the client's
-        credentials and returns the parsed JSON response, which typically
-        contains the access token along with metadata such as expiry and
-        token type.
-
-        Returns:
-            dict: The parsed JSON response from the JWT endpoint. Expected
-                keys typically include:
-                    - access_token (str): The issued JWT.
-                    - token_type (str): Usually "Bearer".
-                    - expires_in (int): Token lifetime in seconds.
-
-        Raises:
-            requests.exceptions.RequestException: If the HTTP request fails
-                (e.g., connection error, timeout).
-            ValueError: If the response body is not valid JSON.
-
-        Note:
-            This method does not call `raise_for_status()`, so HTTP error
-            responses (4xx/5xx) will not raise an exception and may instead
-            return an error payload as a dict.
-        """
-        response = requests.post(
-            self.jwt_url,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data={
-                "grant_type": "client_credentials",
-                "client_id": self.jwt_client_id,
-                "client_secret": self.jwt_client_secret,
-            }
-        ).json()
-
-        return response
+        if isinstance(self.auth_adapter, OAuth2Adapter):
+            return self.auth_adapter.get_jwt_token()
+        return {}
 
 
 def main():
