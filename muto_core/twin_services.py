@@ -34,6 +34,7 @@ class TwinServices:
         self.node.create_service(CoreTwin, f"{self.nname}/register_telemetry", self.callback_register_telemetry)
         self.node.create_service(CoreTwin, f"{self.nname}/delete_telemetry", self.callback_delete_telemetry)
         self.node.create_service(CoreTwin, f"{self.nname}/get_internet_status", self.callback_get_internet_status)
+        self.node.create_service(CoreTwin, f"{self.nname}/get_credentials", self.callback_get_credentials)
 
     def callback_get_current_properties(self, request, response):
         """
@@ -243,5 +244,10 @@ class TwinServices:
             response: The response object containing the internet connection status.
         """
         response.output = str(self.node.internet_status)
+
+        return response
+
+    def callback_get_credentials(self, request, response):
+        response.output = json.dumps(self.node.get_credentials())
 
         return response
